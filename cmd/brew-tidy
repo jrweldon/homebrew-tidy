@@ -1,0 +1,114 @@
+#!/bin/bash
+#: `tidy` will look for any formulae installed which are not used by anything.
+#: 
+#: USAGE:
+#:    `brew tidy` [options]
+#:
+#: OPTIONS:
+#:     -h, --help
+#:       Shows this fairly useless help dialog.
+
+set -eu
+
+TIDY_DIR=$(mktemp -d)
+USED_BY=$(mktemp -p "$TIDY_DIR")
+UNINSTALLING=$(mktemp -p "$TIDY_DIR")
+# Make sure we cleanup when the script exits.
+trap 'rm -rf "$TIDY_DIR"' EXIT
+
+# Helper function to determine what might be available for deletion. Reads each
+# line of the USED_BY file to find
+function find_candidates () {
+  while IFS=":" read -r formula used_by_formulae; do
+    if [[ -z "${used_by_formulae// }" ]]; then
+      if ! grep -woq "$formula" "$UNINSTALLING"; then
+        echo "$formula"
+      fi
+    fi
+  done < "$USED_BY"
+}
+
+# Helper function to escape forward slashes for use with 'sed'. This is because
+# the BSD variant of 'sed' that MacOSX uses does not support alternative
+# separator tokens for some expressions.
+function escape_forward_slashes () {
+  echo "${@//\//\\/}"
+}
+
+# Prepare file with the list of installed formulae
+while IFS="" read -r formula; do
+  echo "$formula:" >> "$USED_BY"
+done < <(brew list --full-name)
+
+# Query the dependencies for installed formulae to map each formula to the list
+# of things that depend on it.
+while IFS=":" read -r formula dependencies; do
+  if [[ "${dependencies// }" ]]; then
+    escaped_formula=$(escape_forward_slashes "$formula")
+    for dep in $dependencies; do
+      escaped_dep=$(escape_forward_slashes "$dep")
+      sed -i.bak "/^${escaped_dep}:/ s/\$/ ${escaped_formula} /" "$USED_BY"
+    done
+  fi
+done < <(brew deps --installed --full-name)
+
+echo "Checking for formulae that might be able to be removed..."
+CANDIDATES=$(find_candidates)
+
+while [[ "${CANDIDATES// }" ]]; do
+  NUM_CANDIDATES=$(echo "$CANDIDATES" | awk 'END{print NR}' )
+  echo 
+  echo "$NUM_CANDIDATES formulae are currently not used by anything:"
+  echo "$CANDIDATES" | tr '\n' ' ' 
+  echo
+
+  for formula in $CANDIDATES; do
+    escaped_formula=$(escape_forward_slashes "$formula")
+    unset CHOICE
+    while [[ -z "${CHOICE+x}" ]]; do
+      read -rp "Uninstall $formula? [y/n] " CHOICE
+      case $CHOICE in
+        y|Y)
+          # Yes? Then remove it from anything that might depend on this.
+          sed -i.bak "s/ ${escaped_formula} / /g" "$USED_BY"
+          echo "$formula" >> "$UNINSTALLING"
+          ;;
+        n|N)
+          # No? Then remove this formula from our list so that we don't check it again.
+          sed -i.bak "/^${escaped_formula}:/d" "$USED_BY"
+          ;;
+        *) unset CHOICE ;;
+      esac
+    done
+  done
+
+  echo "Finished round of formulae. Checking for any new candidates..."
+  CANDIDATES=$(find_candidates)
+done
+echo "No more candidates."
+echo
+
+
+NUM_UNINSTALLING=$(awk 'END{print NR}' "$UNINSTALLING")
+if [[ $NUM_UNINSTALLING -eq 0 ]]; then
+  echo "Nothing was selected to be uninstalled."
+else
+  echo "$NUM_UNINSTALLING formulae will be uninstalled:"
+  tr '\n' ' ' < "$UNINSTALLING"
+  echo
+  echo "Are you absolutely certain you want to proceed? (enter option number)"
+
+  # Intentionally switching to select, which requires entering the option number.
+  select CHOICE in "Yes" "No"; do
+    case $CHOICE in
+        No )
+          echo "Ok, nothing will be uninstalled."
+          break
+          ;;
+        Yes )
+          xargs -n 1 brew uninstall < "$UNINSTALLING"
+          break
+          ;;
+    esac
+  done
+fi
