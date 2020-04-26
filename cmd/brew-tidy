@@ -11,8 +11,9 @@
 set -eu
 
 TIDY_DIR=$(mktemp -d)
-USED_BY=$(mktemp -p "$TIDY_DIR")
-UNINSTALLING=$(mktemp -p "$TIDY_DIR")
+USED_BY="${TIDY_DIR}/usages"
+UNINSTALLING="${TIDY_DIR}/uninstalling"
+touch "$UNINSTALLING"
 # Make sure we cleanup when the script exits.
 trap 'rm -rf "$TIDY_DIR"' EXIT
 
