@@ -1,6 +1,6 @@
 class BrewTidy < Formula
     homepage "https://github.com/jrweldon/homebrew-tidy"
-    url "https://github.com/jrweldon/homebrew-tidy.git", :tag => "0.1.0"
+    url "https://github.com/jrweldon/homebrew-tidy.git", :tag => "0.1.1"
     desc "External command to find and help remove unused homebrew formulae."
   
     head "https://github.com/jrweldon/homebrew-tidy.git"
